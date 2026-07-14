@@ -42,3 +42,6 @@ splunk/splunk-ta-aws.tgz
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code runtime state (project instructions and agents remain tracked)
+.claude/scheduled_tasks.lock
