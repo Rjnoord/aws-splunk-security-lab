@@ -1,0 +1,159 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  id-token: write # required for OIDC -> AWS
+  contents: read
+  pull-requests: write # allow posting `terraform plan` output as a PR comment
+
+env:
+  TF_VERSION: "1.7.5"
+  TF_WORKING_DIR: terraform
+  AWS_REGION: us-east-1
+
+jobs:
+  # ---------------------------------------------------------------
+  # Runs on every PR. No AWS credentials needed for fmt/validate/
+  # tflint/checkov. Plan needs read-only AWS access via OIDC.
+  # ---------------------------------------------------------------
+  validate:
+    name: fmt / validate / lint / scan / plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt -check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform init (no backend — syntax/provider validation only)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: tflint
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          tflint --init
+          tflint --recursive
+
+      # Checkov chosen over tfsec: tfsec was merged into (and its
+      # engine absorbed by) Checkov's Trivy-based tooling upstream,
+      # and Checkov has broader out-of-the-box policy coverage for
+      # SOC2/PCI-style checks (encryption, public access, logging)
+      # that map directly to what this lab is trying to prove —
+      # see terraform/README.md for the full rationale.
+      - name: Checkov security scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ env.TF_WORKING_DIR }}
+          framework: terraform
+          soft_fail: true # don't block the PR yet; surface findings for review
+          quiet: true
+
+      # Plan requires read AWS access. Only attempt it if the OIDC
+      # plan role has been bootstrapped (see terraform/bootstrap) and
+      # the AWS_OIDC_PLAN_ROLE_ARN repo variable is set — this lets
+      # fmt/validate/lint/scan still pass on a fresh clone before the
+      # human bootstrap step has happened. This role is trusted only
+      # for `pull_request`-triggered runs and carries read-only
+      # (ReadOnlyAccess) permissions — it is NOT the apply role, and
+      # must never be granted write/IAM/Organizations access, since
+      # GitHub exposes this variable even to fork-originated PRs.
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ vars.AWS_OIDC_PLAN_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-plan
+
+      - name: terraform init (with backend)
+        if: ${{ vars.AWS_OIDC_PLAN_ROLE_ARN != '' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: terraform plan
+        if: ${{ vars.AWS_OIDC_PLAN_ROLE_ARN != '' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -no-color -out=tfplan
+        env:
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+
+      # Plan is generated but never auto-applied on a PR. A human
+      # reviews the plan output in the Actions log (or a PR comment
+      # step could be added here) before merging.
+
+  # ---------------------------------------------------------------
+  # Runs only on push to main, and only after a human approves the
+  # `production` GitHub Environment (Settings -> Environments ->
+  # production -> required reviewers). This is the only job allowed
+  # to `terraform apply` — it touches real AWS spend and security
+  # posture (SCPs, GuardDuty, CloudTrail).
+  # ---------------------------------------------------------------
+  apply:
+    name: terraform apply (gated)
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production # configure required reviewers on this environment in GitHub repo settings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # This job runs under the `production` GitHub Environment (see
+      # `environment:` above), so the `sub` claim in its OIDC token is
+      # `repo:ORG/REPO:environment:production` — the ONLY sub the
+      # apply role's trust policy accepts. That ties the human
+      # reviewer approval on this environment to an IAM-enforced
+      # condition, not just this workflow's `if:` gate.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-apply
+
+      - name: terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -no-color -out=tfplan
+        env:
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+
+      - name: terraform apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -auto-approve tfplan

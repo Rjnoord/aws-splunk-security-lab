@@ -1,0 +1,37 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# Never commit real variable values or secrets.
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Local plan output
+*.tfplan
+tfplan.binary
+
+# Secrets / credentials
+*.pem
+*.key
+.env
+.env.*
+credentials
+credentials.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

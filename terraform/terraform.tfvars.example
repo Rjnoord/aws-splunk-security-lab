@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored — never commit it.
+
+region                 = "us-east-1"
+org_id                 = "o-xxxxxxxxxx"
+management_account_id  = "111111111111"
+security_account_id    = "222222222222"
+workload_account_id    = "333333333333"
+
+# Null if applying locally as a management-account principal;
+# set if the security-account/CI principal must assume a role in
+# the management account for org-level actions (SCPs, org trail).
+management_role_arn = null
+
+budget_alert_email = "you@example.com"
+budget_limit_usd    = 50
+
+log_archive_bucket_name = "meridian-pay-log-archive-222222222222"
+
+enable_vpc_flow_logs = false
+workload_vpc_id       = null
+
+guardduty_member_account_ids = ["333333333333"]
+guardduty_member_emails = {
+  "333333333333" = "you+workload@example.com"
+}
