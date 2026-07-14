@@ -1,0 +1,87 @@
+<!--
+  SOC Overview dashboard — Phase 4.
+  Panels per docs/DETECTIONS.md "Dashboard panels (Phase 4)" section.
+  Built in Simple XML (not Dashboard Studio) intentionally, so it stays
+  plain-text and diffable in version control, matching the rest of this
+  repo's "config as files" convention.
+-->
+<dashboard version="1.1" script="" theme="dark">
+  <label>SOC Overview</label>
+  <description>Phase 4 — AWS Security Lab operational dashboard. Findings by severity, top event activity, failed logins by geo, API activity by region, and the detection-hit timeline sourced from the summary_detections index.</description>
+
+  <row>
+    <panel>
+      <title>Findings by Severity (last 24h)</title>
+      <chart>
+        <search>
+          <query>index=aws_security | timechart count by severity</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.axisTitleY.text">Findings</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top eventNames (CloudTrail)</title>
+      <table>
+        <search>
+          <query>index=aws_cloudtrail | top limit=15 eventName</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Failed Console Logins by Source IP (Geo)</title>
+      <map>
+        <search>
+          <query>
+            index=aws_cloudtrail eventName=ConsoleLogin responseElements.ConsoleLogin=Failure
+            | iplocation sourceIPAddress
+            | geostats count by sourceIPAddress
+          </query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="mapping.type">marker</option>
+      </map>
+    </panel>
+    <panel>
+      <title>API Calls by Region</title>
+      <map>
+        <search>
+          <query>index=aws_cloudtrail | geostats count by awsRegion</query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="mapping.type">choropleth</option>
+      </map>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Detection-Hit Timeline (all 8 detections)</title>
+      <description>Sourced from summary_detections, populated by each detection's summary_index alert action (see savedsearches.conf). Will be sparse for D5/D8 until their upstream data sources (GuardDuty via Pattern B, VPC Flow Logs) are enabled per docs/PLAN.md Phase 3.</description>
+      <chart>
+        <search>
+          <query>
+            index=summary_detections
+            | timechart count by detection_id
+          </query>
+          <earliest>-7d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.axisTitleY.text">Alert fires</option>
+      </chart>
+    </panel>
+  </row>
+</dashboard>

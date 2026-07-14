@@ -28,3 +28,16 @@ Config applied via `etc/system/local/indexes.conf` and `etc/system/local/inputs.
 ## Phase 3 — Pattern A (S3 → SNS → SQS)
 
 Terraform for the AWS side lives in `terraform/modules/ingestion-sqs/`. Splunk-side install/config steps (Dockerfile extending this same container with the Splunk Add-on for AWS, `aws_sqs_based_s3` input, IAM credential entry) are documented in `splunk/phase3-pattern-a-setup.md`. CloudTrail sourcetype only for now — VPC Flow/WAF are deferred until those log sources are enabled. Pattern B (EventBridge → Firehose → HEC) is deferred; see `docs/PLAN.md` Phase 3 note.
+
+## Phase 4 — Detections & dashboards
+
+Built as a proper, deployable Splunk app: `splunk/apps/aws_security_lab/` — SPL sourced verbatim from `docs/DETECTIONS.md`, packaged as reviewable/versioned config rather than live edits made against the running container (same reproducibility concern raised in `splunk/phase3-pattern-a-setup.md` for the TA install).
+
+Contents:
+- `default/savedsearches.conf` — all 8 detections (D1-D8) as scheduled, throttled alerts. D1/D4/D5/D7 route to email (placeholder recipient token, no address committed); D2/D3/D6/D8 are scheduled/dashboard-only for now. All 8 also write to a new `summary_detections` summary index.
+- `default/indexes.conf` — defines `summary_detections` (90d retention).
+- `default/data/ui/views/soc_overview.xml` — SOC Overview dashboard (findings by severity, top eventNames, failed-login geo, API-by-region choropleth, detection-hit timeline).
+- `default/data/ui/views/investigation.xml` — drilldown dashboard (click a user → their full CloudTrail timeline).
+- `default/app.conf` — app metadata.
+
+Deployment into the running container (`docker cp` + chown + restart), the manual SMTP/email-address step, and DoD validation steps are documented in `splunk/phase4-detections-setup.md`. Nothing here has been applied to the live container yet.

@@ -64,19 +64,35 @@ resource "aws_kms_key" "log_archive" {
         Resource  = "*"
       },
       {
-        Sid    = "AllowLogDeliveryServices"
-        Effect = "Allow"
-        Principal = {
-          Service = [
-            "delivery.logs.amazonaws.com",
-            "config.amazonaws.com",
-          ]
+        Sid       = "AllowConfigToEncrypt"
+        Effect    = "Allow"
+        Principal = { Service = "config.amazonaws.com" }
+        Action = [
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:Decrypt",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
         }
+      },
+      {
+        Sid       = "AllowLogDeliveryToEncrypt"
+        Effect    = "Allow"
+        Principal = { Service = "delivery.logs.amazonaws.com" }
         Action = [
           "kms:GenerateDataKey*",
           "kms:DescribeKey",
         ]
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = var.workload_account_id
+          }
+        }
       }
     ]
   })
@@ -170,6 +186,18 @@ resource "aws_s3_bucket_lifecycle_configuration" "log_archive" {
   }
 }
 
+# NOTE: this bucket relies on the implicit AWS default
+# ObjectOwnership = BucketOwnerEnforced (no explicit
+# aws_s3_bucket_ownership_controls resource in this module),
+# which means ACLs are entirely disabled on it. Do NOT add a
+# `s3:x-amz-acl = bucket-owner-full-control` condition to any
+# write statement below — that header is never processed when
+# ACLs are disabled, so the condition can never be satisfied and
+# silently breaks the Allow statement for every caller (this is
+# what caused AWS Config's delivery-channel test-write to fail
+# with InsufficientDeliveryPolicyException). Bucket Owner
+# Enforced already guarantees the bucket owner owns every object
+# regardless of writer, so no ACL condition is needed at all.
 data "aws_iam_policy_document" "log_archive_bucket_policy" {
   # Deny any request not using TLS.
   statement {
@@ -242,12 +270,6 @@ data "aws_iam_policy_document" "log_archive_bucket_policy" {
 
     condition {
       test     = "StringEquals"
-      variable = "s3:x-amz-acl"
-      values   = ["bucket-owner-full-control"]
-    }
-
-    condition {
-      test     = "StringEquals"
       variable = "aws:SourceOrgID"
       values   = [var.org_id]
     }
@@ -264,12 +286,6 @@ data "aws_iam_policy_document" "log_archive_bucket_policy" {
       type        = "Service"
       identifiers = ["delivery.logs.amazonaws.com"]
     }
-
-    condition {
-      test     = "StringEquals"
-      variable = "s3:x-amz-acl"
-      values   = ["bucket-owner-full-control"]
-    }
   }
 
   statement {
@@ -281,6 +297,70 @@ data "aws_iam_policy_document" "log_archive_bucket_policy" {
     principals {
       type        = "Service"
       identifiers = ["delivery.logs.amazonaws.com"]
+    }
+  }
+
+  # AWS Config's delivery-channel validation checks the bucket's
+  # resource policy directly (the config_s3_write IAM identity policy
+  # on the Config service role alone is not sufficient), mirroring
+  # the CloudTrail Acl/Write pattern above.
+  statement {
+    sid       = "AWSConfigAclCheck"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketAcl"]
+    resources = [aws_s3_bucket.log_archive.arn]
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  statement {
+    sid       = "AWSConfigWrite"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.log_archive.arn}/Config/${data.aws_caller_identity.current.account_id}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  # AWS Config's PutDeliveryChannel validation also performs a bucket
+  # existence check (ListBucket) in addition to GetBucketAcl/PutObject
+  # — without it, PutDeliveryChannel fails with a generic
+  # InsufficientDeliveryPolicyException that doesn't name the missing
+  # permission. Matches AWS's documented AWSConfigBucketExistenceCheck
+  # statement pattern.
+  statement {
+    sid       = "AWSConfigBucketExistenceCheck"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.log_archive.arn]
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
     }
   }
 }
@@ -362,6 +442,15 @@ resource "aws_guardduty_member" "workload" {
   invite                     = true
   invitation_message         = "Meridian Pay security lab — GuardDuty delegated administration."
   disable_email_notification = true
+
+  # `email` is write-only in GuardDuty's API (never returned on read),
+  # so Terraform always sees drift between the configured value and
+  # empty state. Ignore it to stop perpetual replace-on-plan; a real
+  # email change requires a manual/tainted replace, which our
+  # deny-disable-guardduty SCP (p-h25g4yke) would otherwise block.
+  lifecycle {
+    ignore_changes = [email]
+  }
 }
 
 # ---------------------------------------------------------------
@@ -385,6 +474,16 @@ resource "aws_securityhub_organization_admin_account" "this" {
 # ---------------------------------------------------------------
 # AWS Config — recorder + delivery channel to the log-archive
 # bucket, so configuration history is part of the audit evidence.
+#
+# DISABLED by default (var.enable_aws_config = false): AWS Config's
+# PutDeliveryChannel does not support S3 buckets with Object Lock +
+# default retention enabled — confirmed against real AWS (every
+# permission combination was tried and rejected identically before
+# finding this documented limitation). The log-archive bucket has
+# Object Lock in COMPLIANCE mode deliberately, for CloudTrail
+# tamper-evidence, so Config can't use it as a delivery target.
+# Revisit with a separate, non-Object-Lock bucket dedicated to
+# Config if/when this is needed.
 # ---------------------------------------------------------------
 
 data "aws_iam_policy_document" "config_assume_role" {
@@ -400,26 +499,26 @@ data "aws_iam_policy_document" "config_assume_role" {
 }
 
 resource "aws_iam_role" "config" {
+  count              = var.enable_aws_config ? 1 : 0
   name               = "meridian-pay-aws-config"
   assume_role_policy = data.aws_iam_policy_document.config_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "config_managed" {
-  role       = aws_iam_role.config.name
+  count      = var.enable_aws_config ? 1 : 0
+  role       = aws_iam_role.config[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole"
 }
 
 data "aws_iam_policy_document" "config_s3_write" {
+  # Same BucketOwnerEnforced reasoning as the bucket resource policy
+  # above: no s3:x-amz-acl condition, that header is never sent when
+  # ACLs are disabled, so the condition would silently make this
+  # statement never match.
   statement {
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.log_archive.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/Config/*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "s3:x-amz-acl"
-      values   = ["bucket-owner-full-control"]
-    }
+    resources = ["${aws_s3_bucket.log_archive.arn}/Config/${data.aws_caller_identity.current.account_id}/*"]
   }
 
   statement {
@@ -430,14 +529,16 @@ data "aws_iam_policy_document" "config_s3_write" {
 }
 
 resource "aws_iam_role_policy" "config_s3_write" {
+  count  = var.enable_aws_config ? 1 : 0
   name   = "config-s3-write"
-  role   = aws_iam_role.config.id
+  role   = aws_iam_role.config[0].id
   policy = data.aws_iam_policy_document.config_s3_write.json
 }
 
 resource "aws_config_configuration_recorder" "security" {
+  count    = var.enable_aws_config ? 1 : 0
   name     = "meridian-pay-config-recorder"
-  role_arn = aws_iam_role.config.arn
+  role_arn = aws_iam_role.config[0].arn
 
   recording_group {
     all_supported                 = true
@@ -446,15 +547,18 @@ resource "aws_config_configuration_recorder" "security" {
 }
 
 resource "aws_config_delivery_channel" "security" {
+  count          = var.enable_aws_config ? 1 : 0
   name           = "meridian-pay-config-delivery"
   s3_bucket_name = aws_s3_bucket.log_archive.id
-  s3_key_prefix  = "AWSLogs/${data.aws_caller_identity.current.account_id}/Config"
+  s3_key_prefix  = "Config/${data.aws_caller_identity.current.account_id}"
+  s3_kms_key_arn = aws_kms_key.log_archive.arn
 
   depends_on = [aws_s3_bucket_policy.log_archive]
 }
 
 resource "aws_config_configuration_recorder_status" "security" {
-  name       = aws_config_configuration_recorder.security.name
+  count      = var.enable_aws_config ? 1 : 0
+  name       = aws_config_configuration_recorder.security[0].name
   is_enabled = true
 
   depends_on = [aws_config_delivery_channel.security]

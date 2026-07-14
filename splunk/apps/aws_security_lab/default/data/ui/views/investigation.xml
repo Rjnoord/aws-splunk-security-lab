@@ -1,0 +1,46 @@
+<!--
+  Investigation dashboard — Phase 4.
+  Base panel lists recent active users; clicking a row sets the $user$
+  token, which drives the second panel's full CloudTrail timeline for
+  that principal. Simple XML drilldown, matching soc_overview.xml's
+  convention of plain-text/diffable dashboards.
+-->
+<dashboard version="1.1" script="" theme="dark">
+  <label>Investigation</label>
+  <description>Phase 4 drilldown dashboard — click a user in the top panel to pivot into their full CloudTrail activity timeline.</description>
+
+  <row>
+    <panel>
+      <title>Active Users (last 24h) — click a row to investigate</title>
+      <table>
+        <search>
+          <query>
+            index=aws_cloudtrail
+            | stats count earliest(_time) as first_seen latest(_time) as last_seen by userIdentity.arn
+            | convert ctime(first_seen) ctime(last_seen)
+            | sort - count
+          </query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <drilldown>
+          <set token="user">$row.userIdentity.arn$</set>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel depends="$user$">
+      <title>CloudTrail Timeline for $user$</title>
+      <table>
+        <search>
+          <query>index=aws_cloudtrail userIdentity.arn=$user|s$ | sort - _time</query>
+          <earliest>-7d</earliest>
+          <latest>now</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+</dashboard>

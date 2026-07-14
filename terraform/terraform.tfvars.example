@@ -12,6 +12,17 @@ workload_account_id    = "333333333333"
 # the management account for org-level actions (SCPs, org trail).
 management_role_arn = null
 
+# Two operating modes for the default (security-account) provider:
+#   - null: ambient credentials ARE security-account credentials
+#     directly (e.g. an assumed role/profile already in the security
+#     account).
+#   - set: ambient credentials are management-account credentials
+#     (true for both CI's OIDC apply role and a local operator's IAM
+#     user) and this role (typically security account's
+#     auto-created OrganizationAccountAccessRole) is assumed instead.
+# security_role_arn = "arn:aws:iam::222222222222:role/OrganizationAccountAccessRole"
+security_role_arn = null
+
 budget_alert_email = "you@example.com"
 budget_limit_usd    = 50
 

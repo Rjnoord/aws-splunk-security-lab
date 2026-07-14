@@ -25,3 +25,13 @@ variable "github_repo" {
   type        = string
   default     = "aws-splunk-security-lab"
 }
+
+variable "security_account_id" {
+  description = "Account ID of the `security` member account. Used to scope the sts:AssumeRole permission that lets the apply role assume into the security account's OrganizationAccountAccessRole."
+  type        = string
+}
+
+variable "workload_account_id" {
+  description = "Account ID of the `workload` member account. Used to scope the sts:AssumeRole permission that lets the apply role assume into the workload account's OrganizationAccountAccessRole (later phases)."
+  type        = string
+}

@@ -30,6 +30,12 @@ variable "management_role_arn" {
   default     = null
 }
 
+variable "security_role_arn" {
+  description = "ARN of a role in the security account to assume when ambient credentials are for a different account (e.g. management). Null to use ambient credentials directly (when already running as a security-account principal)."
+  type        = string
+  default     = null
+}
+
 variable "budget_alert_email" {
   description = "Email to receive the $50/mo AWS Budgets SNS alert. Set via terraform.tfvars (gitignored) or CI secret — never commit a real address."
   type        = string

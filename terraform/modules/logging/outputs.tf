@@ -21,5 +21,5 @@ output "guardduty_detector_id" {
 }
 
 output "config_recorder_name" {
-  value = aws_config_configuration_recorder.security.name
+  value = var.enable_aws_config ? aws_config_configuration_recorder.security[0].name : null
 }

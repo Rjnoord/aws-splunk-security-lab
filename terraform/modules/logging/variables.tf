@@ -54,6 +54,12 @@ variable "enable_alb_waf_logs" {
   default     = false
 }
 
+variable "enable_aws_config" {
+  description = "Toggle the AWS Config recorder + delivery channel. Off by default: AWS Config does not support delivering to an S3 bucket with Object Lock + default retention enabled (which the log-archive bucket has, deliberately, for CloudTrail tamper-evidence). Revisit with a separate non-Object-Lock bucket for Config if/when this is needed."
+  type        = bool
+  default     = false
+}
+
 variable "guardduty_member_account_ids" {
   description = "Member account IDs (e.g. workload) to invite under GuardDuty delegated administration in the security account."
   type        = list(string)

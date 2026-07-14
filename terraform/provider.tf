@@ -13,19 +13,42 @@ terraform {
   # Left with placeholder values so `terraform init -backend=false`
   # works for local validation without real infrastructure.
   backend "s3" {
-    bucket         = "REPLACE_WITH_BOOTSTRAP_OUTPUT_state_bucket_name"
+    bucket         = "meridian-pay-tfstate-448842988605"
     key            = "meridian-pay/root/terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "REPLACE_WITH_BOOTSTRAP_OUTPUT_lock_table_name"
+    dynamodb_table = "meridian-pay-tfstate-lock"
     encrypt        = true
   }
 }
 
-# Default provider — targets the `security` account. Assumes the
-# CI/local caller already has credentials for the security account
-# (either directly, or via `aws configure` / assumed role locally).
+# Default provider — targets the `security` account. Two operating
+# modes, selected by `var.security_role_arn`:
+#
+#   (a) Ambient credentials ARE security-account credentials directly
+#       (e.g. an `aws configure` profile or assumed role that is
+#       already a security-account principal). Leave
+#       security_role_arn null — the dynamic assume_role block below
+#       is skipped and the provider uses ambient credentials as-is.
+#
+#   (b) Ambient credentials are management-account credentials (this
+#       is the case for both CI's OIDC-assumed `github_actions_apply`
+#       role and a local operator's IAM user — both live in the
+#       management account per the bootstrap trust model). Set
+#       security_role_arn to the security-account role to assume
+#       (AWS's auto-created `OrganizationAccountAccessRole` unless a
+#       purpose-built role exists) so this provider actually operates
+#       against the security account instead of silently creating
+#       resources in management.
 provider "aws" {
   region = var.region
+
+  dynamic "assume_role" {
+    for_each = var.security_role_arn != null ? [var.security_role_arn] : []
+    content {
+      role_arn     = assume_role.value
+      session_name = "meridian-pay-terraform-security"
+    }
+  }
 
   default_tags {
     tags = {

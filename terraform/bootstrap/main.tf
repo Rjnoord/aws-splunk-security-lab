@@ -469,6 +469,42 @@ resource "aws_iam_role_policy" "github_actions_apply_iam_scoped" {
           "organizations:ListDelegatedServicesForAccount",
         ]
         Resource = "*"
+      },
+      {
+        # Both CI's OIDC-assumed apply role and the local operator's
+        # IAM user authenticate as management-account principals (per
+        # the bootstrap trust model above), but the root config's
+        # default provider (terraform/provider.tf) is meant to operate
+        # AS the security account. Without this permission, that
+        # provider's dynamic assume_role block would fail with
+        # AccessDenied the moment security_role_arn is set, since the
+        # calling principal wouldn't be allowed to assume into that
+        # account at all. AWS auto-creates OrganizationAccountAccessRole
+        # in every member account when the account is created via
+        # Organizations, so it's available without any additional
+        # per-account setup.
+        #
+        # Deliberately NOT granting workload_account_id here yet — no
+        # Terraform module targets the workload account today, so
+        # there's no consumer for that grant. Add it (and the
+        # corresponding provider wiring) in the same change that
+        # introduces the first workload-targeting module, so the grant
+        # and its consumer are reviewed together instead of sitting as
+        # unused standing privilege. (Flagged by sentinel review.)
+        #
+        # Also tracked as tech debt: OrganizationAccountAccessRole is
+        # AWS's full-admin-equivalent default role. Using it as the
+        # cross-account bridge is the pragmatic lab choice today, but
+        # the long-term target should be a purpose-built least-privilege
+        # role in the security account scoped to what org-baseline/
+        # logging/ingestion-sqs actually need (KMS, S3, GuardDuty,
+        # Security Hub, Config, CloudTrail, SQS/SNS) — this is the one
+        # place in this file that doesn't follow the no-wildcard,
+        # scoped-admin-paths philosophy used everywhere else.
+        Sid      = "AssumeRoleIntoSecurityAccount"
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = "arn:aws:iam::${var.security_account_id}:role/OrganizationAccountAccessRole"
       }
     ]
   })

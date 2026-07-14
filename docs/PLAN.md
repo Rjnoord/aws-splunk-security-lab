@@ -66,12 +66,16 @@ Work these in order. Each phase has a **Definition of Done (DoD)** and a **cost 
 ## Phase 4 — Detections & dashboards (2 days) — the centerpiece
 **Goal:** turn raw logs into detections, alerts, and an operational dashboard. Full SPL detail in `DETECTIONS.md`.
 
-- [ ] Build the 8 core detection searches (root usage, console login without MFA, IAM policy change, CloudTrail tampering, GuardDuty high-sev, unusual region, S3 public-access change, RDS/data exfil signal).
-- [ ] Convert each to a scheduled alert with throttling; route high-sev to SNS/email.
-- [ ] Build a **SOC Overview dashboard**: findings by severity, top eventNames, failed logins by source IP (geo), API calls by region, detection-hit timeline.
-- [ ] Build one **investigation dashboard** with drilldown (click a user → their CloudTrail timeline).
+- [x] Build the 8 core detection searches (root usage, console login without MFA, IAM policy change, CloudTrail tampering, GuardDuty high-sev, unusual region, S3 public-access change, RDS/data exfil signal).
+- [x] Convert each to a scheduled alert with throttling; route high-sev to SNS/email.
+  - Built as the Splunk app `splunk/apps/aws_security_lab/` (`savedsearches.conf`). Email routing: D1 (root usage), D4 (CloudTrail tampering), D5 (GuardDuty high-sev), D7 (public S3) get `action.email = 1` with a placeholder `$email$` token; D2/D3/D6/D8 are scheduled/dashboard-visible only. SMTP + the real recipient address are a manual, uncommitted step for RJ — see `splunk/phase4-detections-setup.md`. Not yet deployed to the running container.
+  - D5 (index=aws_security, GuardDuty) and D8 (index=aws_vpcflow) are correctly configured but will return no real data until Phase 3 Pattern B and VPC Flow Log delivery are enabled (both still unchecked above).
+- [x] Build a **SOC Overview dashboard**: findings by severity, top eventNames, failed logins by source IP (geo), API calls by region, detection-hit timeline.
+  - `splunk/apps/aws_security_lab/default/data/ui/views/soc_overview.xml`. Detection-hit timeline reads from a new `summary_detections` summary index (`indexes.conf`) that all 8 alerts write to via `summary_index` alert action.
+- [x] Build one **investigation dashboard** with drilldown (click a user → their CloudTrail timeline).
+  - `splunk/apps/aws_security_lab/default/data/ui/views/investigation.xml`.
 
-**DoD:** you can trigger each detection with a controlled action (Phase 5), see the alert fire, and pivot in the dashboard.
+**DoD:** you can trigger each detection with a controlled action (Phase 5), see the alert fire, and pivot in the dashboard. Config is built and app-packaged; deployment into the running container and full DoD validation (real alert fires, dashboard pivot) are documented as manual next steps in `splunk/phase4-detections-setup.md` — actual triggering of detections is Phase 5 scope.
 **Cost checkpoint:** compute-bound on the one instance; ~$0 incremental.
 **Exam tie-in:** Splunk Core/Power User (SPL, `stats`/`eval`/`stats` correlation, transforming commands, dashboards, scheduled alerts, drilldowns); SCS Domain 1 (detection engineering).
 

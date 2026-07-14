@@ -118,6 +118,41 @@ Two provider identities are in play (`provider.tf`):
   role in the management account; leave it `null` to apply directly as a
   management-account identity.
 
+Each provider supports two operating modes, selected by whether its
+`*_role_arn` variable is null or set:
+- **Mode (a) — ambient credentials already match the target account.**
+  E.g. running locally as a security-account IAM user, or as a
+  management-account user for the `aws.management` alias. Leave the
+  corresponding `*_role_arn` variable `null`; the provider's dynamic
+  `assume_role` block is skipped and ambient credentials are used
+  as-is.
+- **Mode (b) — ambient credentials are for a *different* account and
+  must assume a role to reach the target account.** This is the
+  actual situation in this repo: both CI's OIDC-assumed
+  `github_actions_apply` role and the local operator's IAM user are
+  management-account principals (per `bootstrap/main.tf`'s trust
+  model), but the default provider is meant to operate as the
+  `security` account. Set `security_role_arn` (and/or
+  `management_role_arn`, if also hopping into management from a
+  third identity) to the role to assume — normally the
+  auto-created `OrganizationAccountAccessRole` in that member
+  account.
+
+Because mode (b) needs `sts:AssumeRole` permission on the caller's
+IAM role/user, `bootstrap/main.tf` grants `github_actions_apply` (and,
+by extension, anyone using the same management-account credentials
+locally) `sts:AssumeRole` scoped to the security and workload
+accounts' `OrganizationAccountAccessRole` ARNs
+(`aws_iam_role_policy.github_actions_apply_iam_scoped`, statement
+`AssumeRoleIntoMemberAccounts`). **This is an additive change to
+already-live bootstrap infrastructure** — bootstrap was applied for
+real before this permission existed, so `terraform/bootstrap` must be
+re-applied (not a fresh apply — the state bucket, DynamoDB table, and
+OIDC provider/roles already exist) before `security_role_arn` can
+actually be used in the root config. Until that re-apply happens,
+setting `security_role_arn` will fail with an `AccessDenied` on
+`sts:AssumeRole`.
+
 ## CI/CD
 
 `.github/workflows/terraform.yml`:

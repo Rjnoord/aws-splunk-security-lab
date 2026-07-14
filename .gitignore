@@ -31,6 +31,13 @@ tfplan.binary
 credentials
 credentials.json
 
+# Splunk — instance-specific overrides and downloaded add-ons never belong
+# in version control (real email addresses, SMTP creds, IAM keys entered
+# via Splunk Web all land under local/; the TA .tgz is a Splunkbase
+# download, not something we redistribute).
+splunk/apps/*/local/
+splunk/splunk-ta-aws.tgz
+
 # Editor / OS
 .DS_Store
 .idea/
