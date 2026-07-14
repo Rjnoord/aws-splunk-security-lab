@@ -190,9 +190,14 @@ data "aws_iam_policy_document" "splunk_puller" {
   }
 
   statement {
-    sid       = "ReadCloudTrailObjects"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
+    sid    = "ReadCloudTrailObjects"
+    effect = "Allow"
+    # GetObjectVersion is required (not just GetObject) because the
+    # bucket has S3 Versioning enabled (a hard requirement of Object
+    # Lock) — the Splunk Add-on for AWS fetches specific object
+    # versions, not just the latest, and GetObject alone is
+    # insufficient once a bucket is versioned.
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
     resources = ["${var.log_archive_bucket_arn}/${var.notification_filter_prefix}*"]
   }
 
