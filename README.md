@@ -217,3 +217,6 @@ Every Terraform change to IAM, KMS key policies, or S3 bucket policies in this r
 - Missing `aws:SourceAccount` scoping on service-principal bucket-policy statements that would have allowed *any* AWS account's Config/log-delivery service to target this bucket, not just this one.
 
 Full detail on the review pattern and findings is in `docs/PLAN.md` and the commit history.
+
+## Youtube Video for /loop engineering walkthrough 
+(https://youtu.be/5K9MOWHdLYI)
