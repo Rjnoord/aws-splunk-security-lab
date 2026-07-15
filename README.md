@@ -6,9 +6,9 @@ You are the founding security engineer for **Meridian Pay**, a fictional mid-siz
 
 Every component maps to a business driver (compliance, fraud, availability, insider risk) *and* an exam objective. That's what makes this a portfolio piece, not a tutorial.
 
-## Status: Phase 0–1 + Phase 3 (Pattern A) live on real AWS · Phase 4 deployed to local Splunk
+## Status: Phase 0–1 + Phase 3 (Pattern A) + Phase 4 proven live on real AWS · currently torn down between sessions
 
-This isn't a paper design — the Terraform in this repo has been applied to real AWS accounts, and the fixes below were only discoverable by doing that.
+This isn't a paper design — the Terraform in this repo has been applied to real AWS accounts, and the fixes below were only discoverable by doing that. The table below reflects what has been **proven live at least once**; see [Lab lifecycle](#lab-lifecycle-build-demonstrate-tear-down) for what's actually running right now.
 
 | Phase | What | Status |
 |---|---|---|
@@ -72,6 +72,52 @@ flowchart TB
 ```
 
 **Why a laptop-based Splunk instead of the original EC2/ALB design?** RJ already had Splunk Enterprise running locally in Docker. Rather than stand up redundant infrastructure, the ingestion path was adapted: Pattern A (S3 → SNS → SQS) works fine with a laptop puller making outbound-only AWS API calls — no inbound reachability needed. Pattern B (EventBridge → Firehose → HEC) *can't* work this way, since Firehose has to push to Splunk, and a laptop has no stable public endpoint. See [Deviations](#deviations-from-the-original-design) for the full reasoning and what the production-shaped alternative would look like.
+
+## Detection pipeline
+
+```mermaid
+sequenceDiagram
+    participant AWS as AWS API activity
+    participant CT as CloudTrail
+    participant S3 as S3 Log Archive
+    participant SQS as SQS Queue
+    participant TA as Splunk Add-on for AWS
+    participant SPL as Splunk (indexes)
+    participant DET as Scheduled detections (D1-D8)
+    participant SOC as SOC Overview dashboard
+    participant Email as Analyst (email)
+
+    AWS->>CT: API call recorded
+    CT->>S3: Deliver log file (KMS-encrypted, Object Lock)
+    S3->>SQS: ObjectCreated notification (via SNS)
+    TA->>SQS: Poll (outbound only, scoped IAM keys)
+    SQS-->>TA: Log file reference
+    TA->>SPL: Pull + index (aws_cloudtrail)
+    SPL->>DET: Run correlation searches on schedule
+    DET->>SOC: Write hit to summary_detections
+    DET-->>Email: High-severity match -> SMTP alert action
+```
+
+## Lab lifecycle: build, demonstrate, tear down
+
+This lab is deliberately **not** left running 24/7 — it's rebuilt on demand from Terraform, exercised, evidenced with screenshots/recordings, then the actively-billing pieces are torn down to keep cost near zero between sessions.
+
+| State | What's live | Approx. cost |
+|---|---|---|
+| Built (demo) | Everything in the architecture diagram above | ~$1–4/day (GuardDuty-dominated) |
+| Torn down (idle) | S3 log-archive bucket + KMS key (Object Lock, encrypted), IAM/SSM roles, budget alarm, `deny_leave_region` SCP | Pennies/month |
+
+Torn down between sessions: SQS/SNS ingestion pipeline, Security Hub, GuardDuty (detector + delegated admin), the org CloudTrail trail, and the `deny_disable_guardduty`/`deny_disable_cloudtrail` SCP attachments (temporarily detached so Terraform could remove the resources they protect). **Never torn down**: the log-archive bucket, its KMS CMK, versioning, Object Lock, and public-access block — audit log data and its protections are preserved intentionally, per this repo's rule against weakening encryption/retention/audit logging even for cost savings. Re-running `terraform apply` recreates every torn-down resource, including reattaching both SCPs.
+
+## Screenshots & recordings
+
+Visual evidence of the lab running lives in [`docs/screenshots/`](docs/screenshots/):
+
+| File | Shows |
+|---|---|
+| _(added by RJ)_ | Splunk SOC Overview dashboard |
+| _(added by RJ)_ | Detection alert firing (D1–D8) end to end |
+| _(added by RJ)_ | Real ingested CloudTrail data (`index=aws_cloudtrail`) |
 
 ## What this lab demonstrates
 
