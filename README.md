@@ -115,9 +115,13 @@ Visual evidence of the lab running lives in [`docs/screenshots/`](docs/screensho
 
 | File | Shows |
 |---|---|
+| [`aws-cloudtrail-event-history.png`](docs/screenshots/aws-cloudtrail-event-history.png) | AWS Console CloudTrail Event history — real management events (root login, Config, IoT) captured by the org trail |
+| [`aws-cloudwatch-config-metric.png`](docs/screenshots/aws-cloudwatch-config-metric.png) | CloudWatch metric tracking AWS Config's `ConfigurationRecorderInsufficientPermissionsFailure` — evidence for the documented Config/Object-Lock limitation above |
+| [`splunk-addon-s3-inputs-health.png`](docs/screenshots/splunk-addon-s3-inputs-health.png) | Splunk Add-on for AWS health check — SQS-based S3 input throughput and indexing lag, proving Pattern A ingestion is live |
 | _(added by RJ)_ | Splunk SOC Overview dashboard |
 | _(added by RJ)_ | Detection alert firing (D1–D8) end to end |
-| _(added by RJ)_ | Real ingested CloudTrail data (`index=aws_cloudtrail`) |
+
+> Two additional screenshots (raw CloudTrail event JSON, a search showing IAM access key IDs) were captured but excluded — they contained real AWS account IDs and access key IDs embedded throughout the content, not just in croppable chrome. Screenshots 1–3 above were reviewed and cropped to remove account ID/username before committing.
 
 ## What this lab demonstrates
 
